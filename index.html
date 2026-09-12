@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>채점앱 (SnapScore)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800;900&display=swap');
+        body { font-family: 'Pretendard', sans-serif; background-color: #090d16; color: #f1f5f9; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #090d16; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #06b6d4; }
+        
+        .shutter-glow::before {
+            content: ''; position: absolute; inset: -8px; border-radius: 9999px;
+            background: radial-gradient(circle, rgba(6, 182, 212, 0.5) 0%, rgba(6, 182, 212, 0) 70%);
+            animation: pulse-glow 2s cubic-bezier(0.24, 0, 0.38, 1) infinite; z-index: 0;
+        }
+        @keyframes pulse-glow {
+            0% { transform: scale(0.9); opacity: 0.8; }
+            50% { transform: scale(1.25); opacity: 0.2; }
+            100% { transform: scale(0.9); opacity: 0.8; }
+        }
+
+        .corner-tl { position: absolute; top: 20px; left: 20px; width: 28px; height: 28px; border-top: 3px solid #06b6d4; border-left: 3px solid #06b6d4; border-top-left-radius: 8px; }
+        .corner-tr { position: absolute; top: 20px; right: 20px; width: 28px; height: 28px; border-top: 3px solid #06b6d4; border-right: 3px solid #06b6d4; border-top-right-radius: 8px; }
+        .corner-bl { position: absolute; bottom: 20px; left: 20px; width: 28px; height: 28px; border-bottom: 3px solid #06b6d4; border-left: 3px solid #06b6d4; border-bottom-left-radius: 8px; }
+        .corner-br { position: absolute; bottom: 20px; right: 20px; width: 28px; height: 28px; border-bottom: 3px solid #06b6d4; border-right: 3px solid #06b6d4; border-bottom-right-radius: 8px; }
+        
+        .laser-beam {
+            position: absolute; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent 0%, #06b6d4 50%, transparent 100%);
+            box-shadow: 0 0 16px 3px rgba(6, 182, 212, 0.7);
+            animation: scan-move 2.2s ease-in-out infinite alternate;
+        }
+        @keyframes scan-move { 0% { top: 12%; opacity: 0.3; } 50% { opacity: 1; } 100% { top: 88%; opacity: 0.3; } }
+
+        .shutter-flash { position: fixed; inset: 0; background-color: #ffffff; opacity: 0; pointer-events: none; z-index: 100; }
+        .shutter-flash.active { animation: flash-anim 0.2s ease-out forwards; }
+        @keyframes flash-anim { 0% { opacity: 0.45; } 100% { opacity: 0; } }
+        
+        /* Authentic Continuous Scroll Paper */
+        .continuous-scroll-paper {
+            background-color: #ffffff;
+            box-shadow: 0 15px 40px -10px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-[#090d16] text-slate-100 min-h-screen flex flex-col justify-between selection:bg-cyan-500 selection:text-black">
+    <div id="shutter-flash" class="shutter-flash"></div>
+
+    <input type="file" id="camera-file-input" accept="image/*" multiple class="hidden" onchange="handleFileInput(event)">
+
+    <!-- Header -->
+    <header class="sticky top-0 z-30 bg-[#090d16]/95 backdrop-blur-md border-b border-slate-800 px-4 py-3.5">
+        <div class="max-w-md mx-auto flex items-center justify-between">
+            <div class="flex items-center space-x-2.5">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-900/30">
+                    <i class="fa-solid fa-check-double text-slate-950 font-black text-base"></i>
+                </div>
+                <div>
+                    <h1 class="font-extrabold text-base tracking-tight text-white">채점앱</h1>
+                    <p class="text-[10px] text-cyan-400 font-bold tracking-wider uppercase">SnapScore AI</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <!-- Wrong Answer Note Button -->
+                <button onclick="openWrongNotesModal()" class="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-bold flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-book-bookmark"></i>
+                    <span>오답노트</span>
+                    <span id="header-wrong-count" class="bg-rose-500 text-white rounded-full px-1.5 py-0.2 text-[10px]">0</span>
+                </button>
+                <!-- Sound Toggle -->
+                <button onclick="toggleSound()" id="top-sound-btn" class="w-8 h-8 rounded-xl bg-slate-800/90 text-cyan-300 border border-slate-700 text-xs font-bold flex items-center justify-center transition" title="소리 토글">
+                    <i class="fa-solid fa-volume-high"></i>
+                </button>
+                <!-- Flash Toggle -->
+                <button onclick="toggleFlash()" id="top-flash-btn" class="w-8 h-8 rounded-xl bg-slate-800/90 text-slate-400 border border-slate-700 text-xs font-bold flex items-center justify-center transition" title="플래시 토글">
+                    <i class="fa-solid fa-bolt-slash"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Screen -->
+    <main class="flex-1 max-w-md w-full mx-auto px-4 py-5 flex flex-col justify-between">
+        <div class="space-y-4">
+            <!-- Top Status Cards -->
+            <div class="grid grid-cols-2 gap-3">
+                <div class="p-3.5 bg-slate-900/80 border border-slate-800 rounded-2xl">
+                    <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">누적 채점</span>
+                    <h3 id="stat-total-graded" class="text-xl font-black text-cyan-400 font-mono mt-0.5">0회</h3>
+                </div>
+                <div onclick="openWrongNotesModal()" class="p-3.5 bg-slate-900/80 border border-slate-800 hover:border-rose-500/50 rounded-2xl cursor-pointer transition">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">오답노트</span>
+                        <i class="fa-solid fa-arrow-right text-[10px] text-slate-500"></i>
+                    </div>
+                    <h3 id="stat-total-wrong" class="text-xl font-black text-rose-400 font-mono mt-0.5">0개</h3>
+                </div>
+            </div>
+
+            <!-- Viewfinder Area -->
+            <div onclick="openCameraModal()" class="relative aspect-[4/3] rounded-3xl overflow-hidden border-2 border-slate-800 bg-slate-950 flex flex-col items-center justify-center p-6 text-center cursor-pointer group hover:border-cyan-500/60 transition shadow-2xl">
+                <div class="absolute inset-0 opacity-40 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px]"></div>
+                
+                <div class="relative z-10 flex flex-col items-center">
+                    <div class="w-16 h-16 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 flex items-center justify-center text-2xl mb-3 group-hover:scale-110 transition duration-200 shadow-lg">
+                        <i class="fa-solid fa-camera"></i>
+                    </div>
+                    <h3 class="text-base font-extrabold text-white">시험지 카메라 촬영</h3>
+                    <p class="text-xs text-slate-400 mt-1 max-w-[240px]">
+                        화면이나 아래 카메라 버튼을 눌러 시험지를 한 장씩 촬영하세요
+                    </p>
+                </div>
+
+                <div class="corner-tl"></div>
+                <div class="corner-tr"></div>
+                <div class="corner-bl"></div>
+                <div class="corner-br"></div>
+                <div class="laser-beam"></div>
+            </div>
+        </div>
+
+        <!-- Center Shutter Button Area -->
+        <div class="py-6 flex flex-col items-center justify-center">
+            <div class="relative shutter-glow">
+                <button onclick="openCameraModal()" class="w-20 h-20 rounded-full bg-gradient-to-tr from-cyan-400 via-cyan-500 to-blue-500 hover:from-cyan-300 hover:to-blue-400 active:scale-95 text-slate-950 flex items-center justify-center shadow-2xl shadow-cyan-500/40 border-4 border-[#090d16] transition duration-150 z-10">
+                    <i class="fa-solid fa-camera text-3xl"></i>
+                </button>
+            </div>
+            <span class="text-xs font-black text-cyan-400 tracking-wider uppercase mt-3">시험지 촬영 & 채점</span>
+        </div>
+
+        <!-- Bottom Action Buttons -->
+        <div class="flex gap-2">
+            <button onclick="triggerFileInput()" class="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold rounded-2xl text-xs flex items-center justify-center gap-2 border border-slate-800 transition">
+                <i class="fa-solid fa-image text-cyan-400"></i>
+                <span>사진 파일 채점</span>
+            </button>
+            <button onclick="runSampleExamDemo()" class="flex-1 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-extrabold rounded-2xl text-xs flex items-center justify-center gap-1.5 shadow-lg transition">
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                <span>샘플 시험지 채점</span>
+            </button>
+        </div>
+    </main>
+
+    <!-- FULLSCREEN CAMERA MODAL -->
+    <div id="modal-camera" class="fixed inset-0 z-50 modal-backdrop hidden flex flex-col justify-between bg-black">
+        <!-- Top Toolbar -->
+        <div class="px-4 py-3 flex items-center justify-between bg-black/80 backdrop-blur-md border-b border-white/10 z-30">
+            <div class="flex items-center gap-2">
+                <button onclick="closeCameraModal()" class="w-9 h-9 rounded-full bg-slate-800/80 text-white flex items-center justify-center hover:bg-slate-700 transition">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+                <div>
+                    <span id="camera-page-counter" class="text-xs font-extrabold text-cyan-300 bg-cyan-950/90 px-3 py-1 rounded-full border border-cyan-700/60">
+                        1페이지 촬영 대기
+                    </span>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-1.5">
+                <button id="modal-sound-btn" onclick="toggleSound()" class="px-2.5 py-1.5 rounded-full bg-slate-800/90 text-cyan-300 hover:text-white border border-cyan-700/50 text-xs font-bold flex items-center gap-1 transition">
+                    <i class="fa-solid fa-volume-high"></i>
+                    <span>소리 ON</span>
+                </button>
+                <button id="modal-flash-btn" onclick="toggleFlash()" class="px-2.5 py-1.5 rounded-full bg-slate-800/90 text-slate-300 hover:text-white border border-slate-700 text-xs font-bold flex items-center gap-1 transition">
+                    <i class="fa-solid fa-bolt-slash text-slate-400"></i>
+                    <span>플래시 OFF</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Viewfinder Screen -->
+        <div class="relative flex-1 flex items-center justify-center overflow-hidden bg-black">
+            <video id="camera-video" playsinline autoplay muted class="w-full h-full object-cover hidden z-10"></video>
+
+            <!-- Clean Exam Viewfinder (No pre-marked answer circles) -->
+            <div id="camera-live-feed" class="w-full h-full flex flex-col items-center justify-center p-4 bg-[#0a0f1d] relative">
+                <div class="w-full max-w-sm aspect-[3/4] bg-white rounded-xl shadow-2xl overflow-hidden border border-slate-300 flex flex-col justify-between p-4 relative pointer-events-none opacity-90">
+                    <div class="text-center border-b pb-2">
+                        <span class="text-[10px] font-bold text-slate-400 uppercase">2026학년도 대학수학능력시험 모의평가</span>
+                        <h4 id="feed-page-title" class="text-xs font-black text-slate-900 mt-0.5">제 1 페이지 (1~10번 문항)</h4>
+                    </div>
+                    <!-- Pure text questions (Zero answer circles) -->
+                    <div class="grid grid-cols-2 gap-2 text-[10px] text-slate-800 my-auto">
+                        <div class="space-y-3">
+                            <div class="font-bold">1. 다음 식의 값은? <span class="text-slate-400 block font-normal">① -2 ② -1 ③ 0 ④ 1 ⑤ 2</span></div>
+                            <div class="font-bold">2. 집합 원소의 합은? <span class="text-slate-400 block font-normal">① 7 ② 9 ③ 11 ④ 13 ⑤ 15</span></div>
+                            <div class="font-bold">3. 등차수열 공차는? <span class="text-slate-400 block font-normal">① 1 ② 2 ③ 2.5 ④ 3 ⑤ 4</span></div>
+                            <div class="font-bold">4. 역함수의 값은? <span class="text-slate-400 block font-normal">① 1 ② 2 ③ 3 ④ 4 ⑤ 5</span></div>
+                            <div class="font-bold">5. 부등식 정수 개수는? <span class="text-slate-400 block font-normal">① 0 ② 1 ③ 2 ④ 3 ⑤ 5</span></div>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="font-bold">6. 로그 계산의 값은? <span class="text-slate-400 block font-normal">① 5 ② 6 ③ 7 ④ 8 ⑤ 9</span></div>
+                            <div class="font-bold">7. 삼각형 cos A의 값은? <span class="text-slate-400 block font-normal">① 1/3 ② 5/7 ③ 3/4 ④ 4/5</span></div>
+                            <div class="font-bold">8. 함수의 극댓값은? <span class="text-slate-400 block font-normal">① 2 ② 3 ③ 4 ④ 5 ⑤ 6</span></div>
+                            <div class="font-bold">9. 확률변수 확률은? <span class="text-slate-400 block font-normal">① 0.2 ② 0.3 ③ 0.4 ④ 0.5</span></div>
+                            <div class="font-bold">10. 두 점 사이 거리는? <span class="text-slate-400 block font-normal">① 3 ② 3.5 ③ 4 ④ 4.5 ⑤ 5</span></div>
+                        </div>
+                    </div>
+                    <div class="text-center text-[9px] text-slate-400 border-t pt-1.5">
+                        하단의 셔터 버튼을 누르면 이 페이지가 촬영됩니다
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reticle & Scan Guide -->
+            <div class="absolute inset-6 pointer-events-none border border-cyan-500/40 rounded-3xl flex flex-col justify-between p-3 z-20">
+                <div class="corner-tl"></div>
+                <div class="corner-tr"></div>
+                <div class="corner-bl"></div>
+                <div class="corner-br"></div>
+                <div class="laser-beam"></div>
+                <div class="text-center bg-black/70 backdrop-blur-sm mx-auto px-4 py-1.5 rounded-full border border-white/10">
+                    <span class="text-[11px] text-cyan-300 font-bold">
+                        시험지 번호가 잘 보이도록 맞추고 셔터를 누르세요
+                    </span>
+                </div>
+            </div>
+
+            <canvas id="camera-canvas" class="hidden"></canvas>
+        </div>
+
+        <!-- Bottom Controls & Multi-Page Tray -->
+        <div class="px-4 py-4 bg-black/90 backdrop-blur-md border-t border-white/10 flex flex-col gap-3 z-30">
+            <!-- Captured Pages Thumbnails Tray -->
+            <div id="camera-thumbnails-container" class="flex items-center gap-2 overflow-x-auto py-1 min-h-[54px]">
+                <span class="text-xs text-slate-500">셔터 버튼을 눌러 페이지를 촬영하세요.</span>
+            </div>
+
+            <div class="flex items-center justify-between">
+                <button onclick="triggerFileInput()" class="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-slate-700">
+                    <i class="fa-solid fa-image text-cyan-400"></i>
+                    <span>사진 선택</span>
+                </button>
+
+                <!-- Center Shutter Snap Button -->
+                <div class="flex flex-col items-center">
+                    <button onclick="takePhoto()" class="w-18 h-18 w-16 h-16 rounded-full bg-white hover:bg-slate-200 active:scale-90 p-1 flex items-center justify-center shadow-2xl transition">
+                        <div class="w-full h-full rounded-full border-2 border-black flex items-center justify-center bg-cyan-500 text-slate-950">
+                            <i class="fa-solid fa-camera text-xl"></i>
+                        </div>
+                    </button>
+                    <span class="text-[10px] text-slate-400 font-bold mt-1">찰칵 (촬영)</span>
+                </div>
+
+                <!-- Complete / Start Grading Button -->
+                <button id="btn-finish-capture" onclick="finishAndGrade()" class="px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-lg transition opacity-50 cursor-not-allowed" disabled>
+                    <span>채점하기</span>
+                    <span id="btn-finish-count" class="bg-black/20 px-1.5 py-0.5 rounded-full text-[10px]">0장</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- RESULT MODAL: AUTHENTIC CONTINUOUS SCROLL (두루마리 형식 시험지) -->
+    <div id="modal-result" class="fixed inset-0 z-50 modal-backdrop hidden overflow-y-auto">
+        <div class="min-h-screen max-w-lg mx-auto p-4 pb-24 flex flex-col gap-4">
+            <!-- Top Sticky Navigation & Total Score Banner -->
+            <div class="sticky top-2 z-30 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl p-4 shadow-2xl space-y-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                        <h3 class="text-sm font-extrabold text-white">채점 완료 (두루마리 연속 보기)</h3>
+                    </div>
+                    <button onclick="closeResultModal()" class="w-8 h-8 rounded-full bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center transition">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                </div>
+
+                <!-- Total Score Summary Card (No answer disclosed) -->
+                <div class="flex items-center justify-between bg-slate-950/80 p-3.5 rounded-xl border border-slate-800">
+                    <div>
+                        <span class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">채점 결과</span>
+                        <div class="flex items-baseline gap-2.5 mt-0.5">
+                            <h2 id="result-total-score" class="text-3xl font-black text-rose-500 font-mono">0점</h2>
+                            <span id="result-correct-ratio" class="text-xs font-bold text-slate-400">(정답 0개 / 오답 0개)</span>
+                        </div>
+                    </div>
+                    <button onclick="openWrongNotesModal()" class="px-3 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/40 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition">
+                        <i class="fa-solid fa-book-bookmark"></i>
+                        <span>오답노트 보기</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Authentic Continuous Scroll Container: Seamlessly connected test pages -->
+            <div class="continuous-scroll-paper rounded-2xl overflow-hidden border border-slate-700">
+                <div id="result-scroll-container" class="flex flex-col divide-y-2 divide-dashed divide-slate-300">
+                    <!-- Page canvases inserted seamlessly in order -->
+                </div>
+            </div>
+
+            <!-- Bottom Actions -->
+            <div class="flex gap-2.5 pt-2">
+                <button onclick="closeResultModal()" class="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs transition">
+                    닫기
+                </button>
+                <button onclick="retakeExam()" class="flex-1 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-extrabold rounded-xl text-xs shadow-lg transition">
+                    <i class="fa-solid fa-camera mr-1"></i> 다시 촬영하기
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WRONG ANSWER NOTE (오답노트) MODAL -->
+    <div id="modal-wrong-notes" class="fixed inset-0 z-50 modal-backdrop hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl max-h-[85vh] flex flex-col">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center">
+                        <i class="fa-solid fa-book-bookmark text-sm"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-extrabold text-white">나의 오답노트</h3>
+                        <p class="text-[11px] text-slate-400">틀린 문제만 모아서 복습합니다</p>
+                    </div>
+                </div>
+                <button onclick="closeWrongNotesModal()" class="w-8 h-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <div class="flex items-center justify-between text-xs">
+                <div class="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+                    <button id="wrong-filter-all" onclick="setWrongFilter('all')" class="px-2.5 py-1 rounded-lg bg-slate-800 text-cyan-400 font-bold">전체</button>
+                    <button id="wrong-filter-unresolved" onclick="setWrongFilter('unresolved')" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white font-medium">복습 필요</button>
+                    <button id="wrong-filter-resolved" onclick="setWrongFilter('resolved')" class="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white font-medium">복습 완료</button>
+                </div>
+                <button onclick="clearAllWrongNotes()" class="text-[11px] text-rose-400 hover:underline">전체 비우기</button>
+            </div>
+
+            <div id="wrong-notes-list" class="flex-1 overflow-y-auto space-y-2.5 pr-1 min-h-[200px]">
+                <!-- Dynamic wrong notes items -->
+            </div>
+
+            <button onclick="closeWrongNotesModal()" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs transition">
+                닫기
+            </button>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT APPLICATION LOGIC -->
+    <script>
+        const AppStorage = {
+            KEYS: {
+                HISTORIES: 'snapscore_hist_v5',
+                WRONG_NOTES: 'snapscore_wrong_v5',
+                SETTINGS: 'snapscore_set_v5'
+            },
+            getSettings() {
+                const s = localStorage.getItem(this.KEYS.SETTINGS);
+                return s ? JSON.parse(s) : { flashEnabled: false, soundEnabled: true };
+            },
+            saveSettings(settings) {
+                localStorage.setItem(this.KEYS.SETTINGS, JSON.stringify(settings));
+            },
+            getHistories() {
+                const raw = localStorage.getItem(this.KEYS.HISTORIES);
+                return raw ? JSON.parse(raw) : [];
+            },
+            saveHistories(histories) {
+                localStorage.setItem(this.KEYS.HISTORIES, JSON.stringify(histories));
+            },
+            getWrongNotes() {
+                const raw = localStorage.getItem(this.KEYS.WRONG_NOTES);
+                return raw ? JSON.parse(raw) : [];
+            },
+            saveWrongNotes(notes) {
+                localStorage.setItem(this.KEYS.WRONG_NOTES, JSON.stringify(notes));
+            }
+        };
+
+        const state = {
+            cameraStream: null,
+            flashEnabled: false,
+            soundEnabled: true,
+            capturedPages: [],
+            wrongFilter: 'all'
+        };
+
+        // PURE SVG EXAM PAPERS (Clean text: Absolutely NO answer circles)
+        const SAMPLE_PAGE_1_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1100" width="800" height="1100">
+  <defs><style>.title{font-family:sans-serif;font-size:24px;font-weight:800;fill:#0f172a;text-anchor:middle}.sub{font-family:sans-serif;font-size:13px;fill:#64748b;text-anchor:middle}.q-title{font-family:sans-serif;font-size:16px;font-weight:800;fill:#0f172a}.q-opt{font-family:sans-serif;font-size:13px;fill:#334155}</style></defs>
+  <rect width="800" height="1100" fill="#f8fafc"/><rect x="25" y="25" width="750" height="1050" fill="#ffffff" stroke="#cbd5e1" stroke-width="2" rx="8"/>
+  <text x="400" y="70" class="title">2026학년도 대학수학능력시험 모의평가 [제 1 페이지]</text>
+  <text x="400" y="95" class="sub">공통영역 (1~10번) | 수험번호: 2026-9812 | 성명: 수험생</text>
+  <line x1="45" y1="115" x2="755" y2="115" stroke="#0f172a" stroke-width="2.5"/>
+  <g transform="translate(65, 160)"><text x="0" y="0" class="q-title">1. 다음 식을 간단히 하였을 때의 값은?</text><text x="25" y="28" class="q-opt">① -2     ② -1     ③ 0     ④ 1     ⑤ 2</text></g>
+  <g transform="translate(65, 260)"><text x="0" y="0" class="q-title">2. 두 집합 A, B에 대하여 원소의 합은?</text><text x="25" y="28" class="q-opt">① 7      ② 9      ③ 11    ④ 13    ⑤ 15</text></g>
+  <g transform="translate(65, 360)"><text x="0" y="0" class="q-title">3. 등차수열 {an}의 공차는?</text><text x="25" y="28" class="q-opt">① 1      ② 2      ③ 2.5   ④ 3     ⑤ 4</text></g>
+  <g transform="translate(65, 460)"><text x="0" y="0" class="q-title">4. 역함수 f⁻¹(7)의 값은?</text><text x="25" y="28" class="q-opt">① 1      ② 2      ③ 3     ④ 4     ⑤ 5</text></g>
+  <g transform="translate(65, 560)"><text x="0" y="0" class="q-title">5. 부등식 x² - 4x + 3 &lt; 0 정수 개수는?</text><text x="25" y="28" class="q-opt">① 0      ② 1      ③ 2     ④ 3     ⑤ 5</text></g>
+  <line x1="400" y1="130" x2="400" y2="1010" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <g transform="translate(435, 160)"><text x="0" y="0" class="q-title">6. log₂(16) + log₃(27)의 값은?</text><text x="25" y="28" class="q-opt">① 5      ② 6      ③ 7     ④ 8     ⑤ 9</text></g>
+  <g transform="translate(435, 260)"><text x="0" y="0" class="q-title">7. 삼각형 ABC에서 cos A의 값은?</text><text x="25" y="28" class="q-opt">① 1/3    ② 5/7    ③ 3/4   ④ 4/5   ⑤ 5/6</text></g>
+  <g transform="translate(435, 360)"><text x="0" y="0" class="q-title">8. 다항함수 f(x)의 극댓값은?</text><text x="25" y="28" class="q-opt">① 2      ② 3      ③ 4     ④ 5     ⑤ 6</text></g>
+  <g transform="translate(435, 460)"><text x="0" y="0" class="q-title">9. 확률변수 X의 확률 P(X ≥ 50)은?</text><text x="25" y="28" class="q-opt">① 0.2    ② 0.3    ③ 0.4   ④ 0.5   ⑤ 0.6</text></g>
+  <g transform="translate(435, 560)"><text x="0" y="0" class="q-title">10. 두 점 (1, 2)와 (4, 6) 사이 거리는?</text><text x="25" y="28" class="q-opt">① 3      ② 3.5    ③ 4     ④ 4.5   ⑤ 5</text></g>
+  <rect x="50" y="990" width="700" height="50" fill="#f1f5f9" stroke="#cbd5e1" rx="6"/><text x="400" y="1022" class="sub" font-size="13">◆ 1페이지 (1~10번)</text>
+</svg>`;
+
+        const SAMPLE_PAGE_2_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1100" width="800" height="1100">
+  <defs><style>.title{font-family:sans-serif;font-size:24px;font-weight:800;fill:#0f172a;text-anchor:middle}.sub{font-family:sans-serif;font-size:13px;fill:#64748b;text-anchor:middle}.q-title{font-family:sans-serif;font-size:16px;font-weight:800;fill:#0f172a}.q-opt{font-family:sans-serif;font-size:13px;fill:#334155}</style></defs>
+  <rect width="800" height="1100" fill="#f8fafc"/><rect x="25" y="25" width="750" height="1050" fill="#ffffff" stroke="#cbd5e1" stroke-width="2" rx="8"/>
+  <text x="400" y="70" class="title">2026학년도 대학수학능력시험 모의평가 [제 2 페이지]</text>
+  <text x="400" y="95" class="sub">공통영역 (11~20번) | 수험번호: 2026-9812 | 성명: 수험생</text>
+  <line x1="45" y1="115" x2="755" y2="115" stroke="#0f172a" stroke-width="2.5"/>
+  <g transform="translate(65, 160)"><text x="0" y="0" class="q-title">11. 수열의 극한 lim (3n+1)/(n+2)의 값은?</text><text x="25" y="28" class="q-opt">① 1      ② 2      ③ 3     ④ 4     ⑤ 5</text></g>
+  <g transform="translate(65, 260)"><text x="0" y="0" class="q-title">12. 정적분 ∫(0→2) (3x² - 2x) dx의 값은?</text><text x="25" y="28" class="q-opt">① 2      ② 3      ③ 4     ④ 5     ⑤ 6</text></g>
+  <g transform="translate(65, 360)"><text x="0" y="0" class="q-title">13. 벡터 a=(2,1), b=(1,3)의 내적 a·b는?</text><text x="25" y="28" class="q-opt">① 5      ② 6      ③ 7     ④ 8     ⑤ 9</text></g>
+  <g transform="translate(65, 460)"><text x="0" y="0" class="q-title">14. 지수방정식 2ˣ = 16의 해는?</text><text x="25" y="28" class="q-opt">① 1      ② 2      ③ 3     ④ 4     ⑤ 5</text></g>
+  <g transform="translate(65, 560)"><text x="0" y="0" class="q-title">15. 평균이 70, 표준편차 5인 정규분포 Z는?</text><text x="25" y="28" class="q-opt">① 1.0    ② 1.2    ③ 1.5   ④ 1.8   ⑤ 2.0</text></g>
+  <line x1="400" y1="130" x2="400" y2="1010" stroke="#e2e8f0" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <g transform="translate(435, 160)"><text x="0" y="0" class="q-title">16. 로그부등식 log₃(x) &lt; 2의 범위는?</text><text x="25" y="28" class="q-opt">① x&lt;6    ② x&lt;8    ③ x&lt;9   ④ x&lt;10  ⑤ x&lt;12</text></g>
+  <g transform="translate(435, 260)"><text x="0" y="0" class="q-title">17. 미분계수 f'(1)의 값은?</text><text x="25" y="28" class="q-opt">① 1      ② 3      ③ 5     ④ 7     ⑤ 9</text></g>
+  <g transform="translate(435, 360)"><text x="0" y="0" class="q-title">18. 확률 P(A∪B)의 값은?</text><text x="25" y="28" class="q-opt">① 0.5    ② 0.6    ③ 0.7   ④ 0.8   ⑤ 0.9</text></g>
+  <g transform="translate(435, 460)"><text x="0" y="0" class="q-title">19. 복소수 z의 실수부는?</text><text x="25" y="28" class="q-opt">① 2      ② 3      ③ 4     ④ 5     ⑤ 6</text></g>
+  <g transform="translate(435, 560)"><text x="0" y="0" class="q-title">20. 호도법 120°를 라디안으로 바꾸면?</text><text x="25" y="28" class="q-opt">① π/3    ② 2π/3   ③ 3π/4  ④ 4π/5  ⑤ 5π/6</text></g>
+  <rect x="50" y="990" width="700" height="50" fill="#f1f5f9" stroke="#cbd5e1" rx="6"/><text x="400" y="1022" class="sub" font-size="13">◆ 2페이지 (11~20번)</text>
+</svg>`;
+
+        // GRADING & CANVAS ENGINE
+        // - Correct: ONLY 'O' on question number
+        // - Incorrect: ONLY 'X' on question number
+        // - Absolutely ZERO answer circles, ZERO text, ZERO score stamps on canvas!
+        const AppScorer = {
+            renderGradingToCanvas(canvas, imageElement, pageResult) {
+                const ctx = canvas.getContext('2d');
+                const width = imageElement.naturalWidth || imageElement.width || 800;
+                const height = imageElement.naturalHeight || imageElement.height || 1100;
+                canvas.width = width;
+                canvas.height = height;
+
+                ctx.clearRect(0, 0, width, height);
+                ctx.drawImage(imageElement, 0, 0, width, height);
+
+                const questions = pageResult.questions || [];
+                questions.forEach(q => {
+                    const x = (q.boxPercent?.x ?? 8.5) * width / 100;
+                    const y = (q.boxPercent?.y ?? 15.0) * height / 100;
+                    const radius = Math.min(width, height) * 0.023;
+
+                    ctx.save();
+                    if (q.isCorrect) {
+                        // ⭕ 맞은 건 O
+                        ctx.strokeStyle = '#dc2626';
+                        ctx.lineWidth = Math.max(4.5, Math.round(width * 0.007));
+                        ctx.lineCap = 'round';
+                        ctx.shadowColor = 'rgba(220, 38, 38, 0.4)';
+                        ctx.shadowBlur = 4;
+                        ctx.beginPath();
+                        ctx.ellipse(x, y, radius * 1.05, radius * 0.95, -0.1, 0, Math.PI * 2);
+                        ctx.stroke();
+                    } else {
+                        // ❌ 틀린 거는 X
+                        ctx.strokeStyle = '#dc2626';
+                        ctx.lineWidth = Math.max(5, Math.round(width * 0.0075));
+                        ctx.lineCap = 'round';
+                        ctx.shadowColor = 'rgba(220, 38, 38, 0.4)';
+                        ctx.shadowBlur = 4;
+                        ctx.beginPath();
+                        ctx.moveTo(x - radius * 0.85, y - radius * 0.85);
+                        ctx.lineTo(x + radius * 0.85, y + radius * 0.85);
+                        ctx.moveTo(x - radius * 0.85, y + radius * 0.85);
+                        ctx.lineTo(x + radius * 0.85, y - radius * 0.85);
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+                });
+            },
+
+            simulatePageGrading(pageNumber, qStart, qEnd) {
+                const questions = [];
+                let correctCount = 0;
+                const total = qEnd - qStart + 1;
+
+                for (let num = qStart; num <= qEnd; num++) {
+                    const isCorrect = Math.random() > 0.3;
+                    if (isCorrect) correctCount++;
+
+                    const relIndex = num - qStart;
+                    const isLeftCol = relIndex < 5;
+                    const rowIndex = isLeftCol ? relIndex : relIndex - 5;
+
+                    const x = isLeftCol ? 9.3 : 55.6;
+                    const y = 14.5 + (rowIndex * 9.1);
+
+                    questions.push({
+                        questionNum: num,
+                        isCorrect,
+                        boxPercent: { x, y }
+                    });
+                }
+
+                const score = Math.round((correctCount / total) * 100);
+                return {
+                    pageNumber,
+                    questions,
+                    score,
+                    correctCount,
+                    totalCount: total
+                };
+            }
+        };
+
+        // SHUTTER SOUND SYNTHESIS
+        function playShutterSound() {
+            if (!state.soundEnabled) return;
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return;
+                const actx = new AudioCtx();
+                const now = actx.currentTime;
+
+                const osc1 = actx.createOscillator();
+                const g1 = actx.createGain();
+                osc1.type = 'triangle';
+                osc1.frequency.setValueAtTime(800, now);
+                osc1.frequency.exponentialRampToValueAtTime(100, now + 0.035);
+                g1.gain.setValueAtTime(0.7, now);
+                g1.gain.exponentialRampToValueAtTime(0.01, now + 0.035);
+                osc1.connect(g1);
+                g1.connect(actx.destination);
+                osc1.start(now);
+                osc1.stop(now + 0.035);
+
+                const bufSize = Math.floor(actx.sampleRate * 0.05);
+                const buf = actx.createBuffer(1, bufSize, actx.sampleRate);
+                const data = buf.getChannelData(0);
+                for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+                const noise = actx.createBufferSource();
+                noise.buffer = buf;
+                const filter = actx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.setValueAtTime(1800, now + 0.015);
+                filter.Q.setValueAtTime(3, now + 0.015);
+                const gNoise = actx.createGain();
+                gNoise.gain.setValueAtTime(0.6, now + 0.015);
+                gNoise.gain.exponentialRampToValueAtTime(0.01, now + 0.065);
+                noise.connect(filter);
+                filter.connect(gNoise);
+                gNoise.connect(actx.destination);
+                noise.start(now + 0.015);
+
+                const osc2 = actx.createOscillator();
+                const g2 = actx.createGain();
+                osc2.type = 'triangle';
+                osc2.frequency.setValueAtTime(500, now + 0.05);
+                osc2.frequency.exponentialRampToValueAtTime(60, now + 0.09);
+                g2.gain.setValueAtTime(0.8, now + 0.05);
+                g2.gain.exponentialRampToValueAtTime(0.01, now + 0.09);
+                osc2.connect(g2);
+                g2.connect(actx.destination);
+                osc2.start(now + 0.05);
+                osc2.stop(now + 0.09);
+            } catch (e) {
+                console.warn(e);
+            }
+        }
+
+        // INITIALIZATION
+        window.addEventListener('DOMContentLoaded', () => {
+            const s = AppStorage.getSettings();
+            state.flashEnabled = s.flashEnabled ?? false;
+            state.soundEnabled = s.soundEnabled ?? true;
+            updateButtonsUI();
+            updateAllCounters();
+        });
+
+        function updateAllCounters() {
+            const h = AppStorage.getHistories();
+            const w = AppStorage.getWrongNotes();
+            const totalEl = document.getElementById('stat-total-graded');
+            const wrongEl = document.getElementById('stat-total-wrong');
+            const headerWrongEl = document.getElementById('header-wrong-count');
+
+            if (totalEl) totalEl.textContent = `${h.length}회`;
+            if (wrongEl) wrongEl.textContent = `${w.length}개`;
+            if (headerWrongEl) headerWrongEl.textContent = `${w.filter(n => !n.resolved).length}`;
+        }
+
+        function updateButtonsUI() {
+            ['top-sound-btn', 'modal-sound-btn'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    if (state.soundEnabled) {
+                        el.innerHTML = `<i class="fa-solid fa-volume-high text-cyan-400"></i><span class="${id.includes('top') ? 'hidden' : ''}">소리 ON</span>`;
+                        el.className = el.className.replace('text-slate-400', 'text-cyan-300');
+                    } else {
+                        el.innerHTML = `<i class="fa-solid fa-volume-xmark text-slate-400"></i><span class="${id.includes('top') ? 'hidden' : ''}">소리 OFF</span>`;
+                        el.className = el.className.replace('text-cyan-300', 'text-slate-400');
+                    }
+                }
+            });
+
+            ['top-flash-btn', 'modal-flash-btn'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    if (state.flashEnabled) {
+                        el.innerHTML = `<i class="fa-solid fa-bolt text-yellow-400"></i><span class="${id.includes('top') ? 'hidden' : ''}">플래시 ON</span>`;
+                        el.className = el.className.replace('text-slate-400', 'text-yellow-300');
+                    } else {
+                        el.innerHTML = `<i class="fa-solid fa-bolt-slash text-slate-400"></i><span class="${id.includes('top') ? 'hidden' : ''}">플래시 OFF</span>`;
+                        el.className = el.className.replace('text-yellow-300', 'text-slate-400');
+                    }
+                }
+            });
+        }
+
+        function toggleSound() {
+            state.soundEnabled = !state.soundEnabled;
+            AppStorage.saveSettings({ flashEnabled: state.flashEnabled, soundEnabled: state.soundEnabled });
+            updateButtonsUI();
+            if (state.soundEnabled) playShutterSound();
+        }
+
+        function toggleFlash() {
+            state.flashEnabled = !state.flashEnabled;
+            AppStorage.saveSettings({ flashEnabled: state.flashEnabled, soundEnabled: state.soundEnabled });
+            updateButtonsUI();
+        }
+
+        // CAMERA MODAL LOGIC
+        async function openCameraModal() {
+            state.capturedPages = [];
+            updateCapturedPagesUI();
+            document.getElementById('modal-camera').classList.remove('hidden');
+
+            const video = document.getElementById('camera-video');
+            const liveFeed = document.getElementById('camera-live-feed');
+
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: { ideal: 'environment' } },
+                        audio: false
+                    }).catch(() => navigator.mediaDevices.getUserMedia({ video: true, audio: false }));
+
+                    if (stream && stream.getVideoTracks().length > 0) {
+                        state.cameraStream = stream;
+                        video.srcObject = stream;
+                        video.classList.remove('hidden');
+                        liveFeed.classList.add('hidden');
+                        await video.play().catch(e => console.log(e));
+                        return;
+                    }
+                } catch (e) {
+                    console.log('Using live viewfinder feed:', e);
+                }
+            }
+
+            video.classList.add('hidden');
+            liveFeed.classList.remove('hidden');
+            updateFeedTitle();
+        }
+
+        function closeCameraModal() {
+            if (state.cameraStream) {
+                state.cameraStream.getTracks().forEach(t => t.stop());
+                state.cameraStream = null;
+            }
+            document.getElementById('modal-camera').classList.add('hidden');
+        }
+
+        function updateFeedTitle() {
+            const titleEl = document.getElementById('feed-page-title');
+            if (titleEl) {
+                const pNum = state.capturedPages.length + 1;
+                titleEl.textContent = pNum === 1 ? '제 1 페이지 (1~10번 문항)' : '제 2 페이지 (11~20번 문항)';
+            }
+        }
+
+        function takePhoto() {
+            if (state.soundEnabled) playShutterSound();
+            if (state.flashEnabled) {
+                const flash = document.getElementById('shutter-flash');
+                if (flash) {
+                    flash.classList.remove('active');
+                    void flash.offsetWidth;
+                    flash.classList.add('active');
+                }
+            }
+
+            const video = document.getElementById('camera-video');
+            const canvas = document.getElementById('camera-canvas');
+            let base64 = '';
+
+            if (state.cameraStream && video && !video.classList.contains('hidden') && video.videoWidth > 0) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                base64 = canvas.toDataURL('image/jpeg', 0.92);
+            } else {
+                const svg = state.capturedPages.length === 0 ? SAMPLE_PAGE_1_SVG : SAMPLE_PAGE_2_SVG;
+                base64 = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+            }
+
+            const pageNumber = state.capturedPages.length + 1;
+            state.capturedPages.push({
+                id: `p_${Date.now()}_${pageNumber}`,
+                pageNumber,
+                imageBase64: base64
+            });
+
+            updateCapturedPagesUI();
+            updateFeedTitle();
+        }
+
+        function triggerFileInput() {
+            document.getElementById('camera-file-input').click();
+        }
+
+        function handleFileInput(event) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+            Array.from(files).forEach(f => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const pageNumber = state.capturedPages.length + 1;
+                    state.capturedPages.push({
+                        id: `p_${Date.now()}_${pageNumber}`,
+                        pageNumber,
+                        imageBase64: e.target.result
+                    });
+                    updateCapturedPagesUI();
+                };
+                reader.readAsDataURL(f);
+            });
+            event.target.value = '';
+        }
+
+        function updateCapturedPagesUI() {
+            const count = state.capturedPages.length;
+            const counter = document.getElementById('camera-page-counter');
+            const btnFinish = document.getElementById('btn-finish-capture');
+            const btnCount = document.getElementById('btn-finish-count');
+            const tray = document.getElementById('camera-thumbnails-container');
+
+            if (counter) counter.textContent = `${count + 1}페이지 촬영 중 (총 ${count}장 스캔됨)`;
+            if (btnCount) btnCount.textContent = `${count}장`;
+
+            if (count > 0) {
+                btnFinish.disabled = false;
+                btnFinish.classList.remove('opacity-50', 'cursor-not-allowed');
+            } else {
+                btnFinish.disabled = true;
+                btnFinish.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+
+            if (tray) {
+                if (count === 0) {
+                    tray.innerHTML = `<span class="text-xs text-slate-500">셔터 버튼을 누르면 페이지가 추가됩니다.</span>`;
+                } else {
+                    tray.innerHTML = state.capturedPages.map((p, i) => `
+                        <div class="relative flex-shrink-0 w-12 h-14 rounded-lg overflow-hidden border-2 border-cyan-500 bg-slate-900 flex items-center justify-center group">
+                            <img src="${p.imageBase64}" class="w-full h-full object-cover">
+                            <span class="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-center font-bold text-cyan-300 py-0.5">${p.pageNumber}페이지</span>
+                            <button onclick="event.stopPropagation(); removePage(${i})" class="absolute top-0 right-0 w-4 h-4 bg-rose-600 text-white rounded-bl text-[9px] flex items-center justify-center">×</button>
+                        </div>
+                    `).join('');
+                }
+            }
+        }
+
+        function removePage(index) {
+            state.capturedPages.splice(index, 1);
+            state.capturedPages.forEach((p, idx) => p.pageNumber = idx + 1);
+            updateCapturedPagesUI();
+            updateFeedTitle();
+        }
+
+        function finishAndGrade() {
+            if (state.capturedPages.length === 0) return;
+            const pagesToGrade = [...state.capturedPages];
+            closeCameraModal();
+            executeGrading(pagesToGrade);
+        }
+
+        function runSampleExamDemo() {
+            const p1 = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(SAMPLE_PAGE_1_SVG)}`;
+            const p2 = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(SAMPLE_PAGE_2_SVG)}`;
+            executeGrading([
+                { id: 'demo1', pageNumber: 1, imageBase64: p1 },
+                { id: 'demo2', pageNumber: 2, imageBase64: p2 }
+            ]);
+        }
+
+        // GRADE AND STORE WRONG NOTES AUTOMATICALLY
+        function executeGrading(pages) {
+            const totalQuestions = 20;
+            const questionsPerPage = Math.ceil(totalQuestions / pages.length);
+            const pageResults = [];
+            let totalCorrect = 0;
+            const newWrongItems = [];
+
+            pages.forEach((page, idx) => {
+                const qStart = (idx * questionsPerPage) + 1;
+                const qEnd = Math.min((idx + 1) * questionsPerPage, totalQuestions);
+                const pageGrading = AppScorer.simulatePageGrading(page.pageNumber, qStart, qEnd);
+                pageGrading.imageBase64 = page.imageBase64;
+                pageResults.push(pageGrading);
+                totalCorrect += pageGrading.correctCount;
+
+                pageGrading.questions.filter(q => !q.isCorrect).forEach(q => {
+                    newWrongItems.push({
+                        id: `w_${Date.now()}_${q.questionNum}`,
+                        questionNum: q.questionNum,
+                        pageNumber: page.pageNumber,
+                        date: new Date().toLocaleDateString(),
+                        resolved: false
+                    });
+                });
+            });
+
+            const overallScore = Math.round((totalCorrect / totalQuestions) * 100);
+            const record = {
+                id: `h_${Date.now()}`,
+                totalScore: overallScore,
+                totalCorrect,
+                totalCount: totalQuestions,
+                pages: pageResults,
+                createdAt: new Date().toISOString()
+            };
+
+            // Save history
+            const histories = AppStorage.getHistories();
+            histories.unshift(record);
+            AppStorage.saveHistories(histories);
+
+            // Save wrong notes
+            const wrongNotes = AppStorage.getWrongNotes();
+            newWrongItems.forEach(item => wrongNotes.unshift(item));
+            AppStorage.saveWrongNotes(wrongNotes);
+
+            updateAllCounters();
+            renderResultModal(record);
+        }
+
+        // RENDER RESULT MODAL: AUTHENTIC CONTINUOUS SCROLL (두루마리)
+        function renderResultModal(record) {
+            const modal = document.getElementById('modal-result');
+            const totalScoreEl = document.getElementById('result-total-score');
+            const correctRatioEl = document.getElementById('result-correct-ratio');
+            const scrollContainer = document.getElementById('result-scroll-container');
+
+            const wrongCount = record.totalCount - record.totalCorrect;
+            totalScoreEl.textContent = `${record.totalScore}점`;
+            correctRatioEl.textContent = `(정답 ${record.totalCorrect}개 / 오답 ${wrongCount}개)`;
+
+            // Continuous scroll paper: seamlessly connected pages
+            scrollContainer.innerHTML = record.pages.map((p, idx) => `
+                <div class="relative bg-white">
+                    ${idx > 0 ? `
+                        <div class="py-1 bg-slate-100 text-center border-b border-t border-dashed border-slate-300">
+                            <span class="text-[10px] font-bold text-slate-500">--- ${p.pageNumber}페이지 이어짐 ---</span>
+                        </div>
+                    ` : ''}
+                    <canvas id="canvas-page-${p.pageNumber}" class="w-full h-auto block"></canvas>
+                </div>
+            `).join('');
+
+            // Draw canvases
+            record.pages.forEach(p => {
+                const canvas = document.getElementById(`canvas-page-${p.pageNumber}`);
+                const img = new Image();
+                img.onload = () => {
+                    AppScorer.renderGradingToCanvas(canvas, img, p);
+                };
+                img.src = p.imageBase64;
+            });
+
+            modal.classList.remove('hidden');
+            modal.scrollTop = 0;
+        }
+
+        function closeResultModal() {
+            document.getElementById('modal-result').classList.add('hidden');
+        }
+
+        function retakeExam() {
+            closeResultModal();
+            openCameraModal();
+        }
+
+        // WRONG NOTES (오답노트) MODAL LOGIC
+        function openWrongNotesModal() {
+            renderWrongNotesList();
+            document.getElementById('modal-wrong-notes').classList.remove('hidden');
+        }
+
+        function closeWrongNotesModal() {
+            document.getElementById('modal-wrong-notes').classList.add('hidden');
+        }
+
+        function setWrongFilter(filter) {
+            state.wrongFilter = filter;
+            ['all', 'unresolved', 'resolved'].forEach(f => {
+                const btn = document.getElementById(`wrong-filter-${f}`);
+                if (btn) {
+                    if (f === filter) {
+                        btn.className = 'px-2.5 py-1 rounded-lg bg-slate-800 text-cyan-400 font-bold';
+                    } else {
+                        btn.className = 'px-2.5 py-1 rounded-lg text-slate-400 hover:text-white font-medium';
+                    }
+                }
+            });
+            renderWrongNotesList();
+        }
+
+        function renderWrongNotesList() {
+            const listEl = document.getElementById('wrong-notes-list');
+            let notes = AppStorage.getWrongNotes();
+
+            if (state.wrongFilter === 'unresolved') notes = notes.filter(n => !n.resolved);
+            if (state.wrongFilter === 'resolved') notes = notes.filter(n => n.resolved);
+
+            if (notes.length === 0) {
+                listEl.innerHTML = `
+                    <div class="p-8 text-center text-slate-500 text-xs flex flex-col items-center">
+                        <i class="fa-solid fa-check-circle text-2xl text-slate-700 mb-2"></i>
+                        <span>오답노트 항목이 없습니다.</span>
+                    </div>
+                `;
+                return;
+            }
+
+            listEl.innerHTML = notes.map(n => `
+                <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-lg ${n.resolved ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'} flex items-center justify-center font-black text-xs">
+                            ${n.resolved ? '✓' : 'X'}
+                        </div>
+                        <div>
+                            <h4 class="text-xs font-bold text-white">${n.questionNum}번 문항 <span class="text-[10px] text-slate-400">(${n.pageNumber}페이지)</span></h4>
+                            <span class="text-[10px] text-slate-500">${n.date} 등록</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="toggleWrongResolved('${n.id}')" class="px-2.5 py-1 rounded-lg text-xs font-bold transition ${n.resolved ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-800 hover:bg-slate-700 text-slate-300'}">
+                            ${n.resolved ? '복습 완료' : '다시 풀기'}
+                        </button>
+                        <button onclick="deleteWrongNote('${n.id}')" class="p-1 text-slate-600 hover:text-rose-400 transition" title="삭제">
+                            <i class="fa-solid fa-trash-can text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function toggleWrongResolved(id) {
+            const notes = AppStorage.getWrongNotes();
+            const target = notes.find(n => n.id === id);
+            if (target) {
+                target.resolved = !target.resolved;
+                AppStorage.saveWrongNotes(notes);
+                updateAllCounters();
+                renderWrongNotesList();
+            }
+        }
+
+        function deleteWrongNote(id) {
+            let notes = AppStorage.getWrongNotes();
+            notes = notes.filter(n => n.id !== id);
+            AppStorage.saveWrongNotes(notes);
+            updateAllCounters();
+            renderWrongNotesList();
+        }
+
+        function clearAllWrongNotes() {
+            if (confirm('오답노트를 모두 비우시겠습니까?')) {
+                AppStorage.saveWrongNotes([]);
+                updateAllCounters();
+                renderWrongNotesList();
+            }
+        }
+    </script>
+</body>
+</html>
